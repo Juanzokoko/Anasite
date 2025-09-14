@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Constelações — Página Interativa</title>
+<style>
+  :root{
+    --text:#f5f7ff; --muted:#b9bed6; --accent:#9fd5ff; --accent2:#ffd18a; --love:#ff6fb1;
+    --glass: rgba(255,255,255,.08);
+  }
+  html,body{
+    margin:0;height:100%;
+    background:transparent; /* vídeo 100% visível */
+    color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial;
+  }
+  .wrap{position:relative;height:100vh;overflow:hidden;}
+  #bg-media{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:-2;}
+
+  /* HUD do jogo */
+  .hud{position:fixed;top:12px;left:50%;transform:translateX(-50%);
+    display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--glass);
+    backdrop-filter:blur(8px);border-radius:16px;z-index:10;}
+  .chip{font-size:.9rem;}
+  .bar{width:240px;height:8px;background:rgba(255,255,255,.12);border-radius:999px;overflow:hidden}
+  .bar>i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));}
+
+  .controls{position:fixed;top:12px;right:12px;display:flex;gap:8px;z-index:11;}
+  .btn{padding:8px 12px;border-radius:12px;background:var(--glass);
+    border:1px solid rgba(255,255,255,.15);color:var(--text);cursor:pointer;}
+
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);
+    width:min(720px,92vw);padding:14px 16px;border-radius:16px;background:rgba(5,8,18,.65);
+    opacity:0;transition:.35s;z-index:20;font-size:1.05rem;line-height:1.4}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  .final{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:22px;text-align:center;background:rgba(5,8,18,.7);
+    opacity:0;z-index:30;transition:.5s;backdrop-filter:blur(8px);}
+  .final.show{opacity:1;}
+  .final h1{font-size:2.8rem;margin:0;opacity:0;animation:fadeIn 1.5s forwards;}
+  .final .love{font-size:3.4rem;font-weight:800;color:var(--love);opacity:0;animation:loveAnim 4s forwards 2s;}
+  @keyframes loveAnim{0%{opacity:0;transform:scale(.8);}30%{opacity:1;transform:scale(1.05);}60%{transform:scale(.95);}100%{transform:scale(1);opacity:1;}}
+  @keyframes fadeIn{to{opacity:1}}
+
+  /* ===== MINI-PLAYER (menor e no topo esquerdo) ===== */
+  .player{
+    position:fixed;top:12px;left:12px; /* <- longe do toast do rodapé */
+    z-index:40;display:flex;align-items:center;gap:8px;
+    padding:6px 8px;border-radius:10px;background:var(--glass);
+    border:1px solid rgba(255,255,255,.15);backdrop-filter:blur(8px);
+  }
+  .player .btn{padding:4px 8px;font-size:.85rem}
+  .pp{cursor:pointer}
+  .time{font-variant-numeric:tabular-nums;font-size:.8rem;color:var(--muted)}
+  .seek{
+    width:clamp(90px,22vw,160px); /* menor e responsivo */
+    height:6px;background:rgba(255,255,255,.18);border-radius:999px;position:relative;cursor:pointer;
+  }
+  .seek>i{position:absolute;left:0;top:0;height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:999px;}
+  .vol{display:flex;align-items:center;gap:6px}
+  .vol input[type="range"]{width:80px}
+
+  /* Se você quiser o player no rodapé depois, troque: top/left -> bottom/left
+     .player{ top:auto; bottom:12px; left:12px; } */
+
+  /* Em telas muito estreitas, ainda cabe sem sombra de sobreposição */
+  @media (max-width: 520px){
+    .player{top:12px;left:12px}
+    .seek{width:clamp(80px,35vw,140px)}
+    .vol input[type="range"]{width:70px}
+  }
+</style>
+</head>
+<body>
+  <!-- Fundo em vídeo -->
+  <video id="bg-media" autoplay muted loop playsinline src="Clarinhaz.mp4"></video>
+
+  <!-- Canvas do jogo -->
+  <div class="wrap"><canvas id="game"></canvas></div>
+
+  <!-- HUD -->
+  <div class="hud">
+    <span class="chip">Orbes: <b id="count">0</b>/30</span>
+    <div class="bar"><i id="barfill"></i></div>
+    <span class="chip" id="status">Explore e colete ✨</span>
+  </div>
+
+  <!-- Apenas pausa do jogo -->
+  <div class="controls">
+    <button class="btn" id="pauseBtn">⏸️ Pausa</button>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <!-- Tela Final -->
+  <section class="final" id="final">
+    <h1>✨ Conclusão desbloqueada</h1>
+    <p>Você cruzou constelações, descobriu detalhes, e cada passo foi um fragmento do que eu sinto.  
+    E se cada orbe fosse uma verdade, juntas formam a mais simples e definitiva:</p>
+    <div class="love">EU TE AMO</div>
+    <button class="btn" onclick="restart()">Jogar de novo</button>
+  </section>
+
+  <!-- ===== PLAYER DE MÚSICA (overlay + mini-player) ===== -->
+  <audio id="music" preload="auto">
+    <source src="Clarinha.mp3" type="audio/mpeg">
+    <source src="Clarinha.ogg" type="audio/ogg">
+  </audio>
+
+  <!-- Overlay de início -->
+  <div class="music-overlay" id="musicOverlay" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);backdrop-filter:blur(6px);z-index:50;">
+    <div class="music-card" style="background:var(--glass);border:1px solid rgba(255,255,255,.15);padding:18px 20px;border-radius:16px;max-width:520px;width:92%;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.35);">
+      <h3 style="margin:0 0 10px;font-weight:700">🎵 Tocar “Clarinha.mp3”</h3>
+      <p style="margin:8px 0 14px;color:var(--muted)">Clique em <b>Tocar</b> para iniciar a música (alguns navegadores exigem interação).  
+      Se não tocar, escolha o arquivo no seu computador.</p>
+      <div class="music-actions" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <button class="btn" id="overlayPlay" style="font-weight:600">▶️ Tocar</button>
+        <button class="btn" id="overlayPick" style="font-weight:600">📁 Escolher arquivo…</button>
+        <input type="file" id="fileInput" accept="audio/*" hidden />
+      </div>
+    </div>
+  </div>
+
+  <!-- Mini-player (topo esquerdo) -->
+  <div class="player" id="playerBar" aria-live="polite">
+    <button class="btn pp" id="ppBtn">▶️</button>
+    <div class="seek" id="seek"><i id="seekFill"></i></div>
+    <span class="time"><span id="tCur">0:00</span> / <span id="tDur">0:00</span></span>
+    <div class="vol">
+      <button class="btn" id="muteBtn">🔊</button>
+      <input type="range" id="vol" min="0" max="1" step="0.01" value="0.65" />
+    </div>
+  </div>
+
+<script>
+/* =======================
+   JOGO (textos intocados)
+   ======================= */
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+let W,H,paused=false;function resize(){W=canvas.width=innerWidth;H=canvas.height=innerHeight;}resize();addEventListener('resize',resize);
+
+const state={player:{x:W/2,y:H/2,r:10,speed:3},orbs:[],collected:0,total:30};
+const pressed={};addEventListener('keydown',e=>pressed[e.key]=true);addEventListener('keyup',e=>pressed[e.key]=false);
+
+const phrases=[ /* <<< NÃO ALTERAR OS TEXTOS >>> */
+ "Cada estrela que você toca é uma memória que brilha só porque existe você.",
+ "A calma que encontro em ti não cabe em palavras pequenas.",
+ "Seu riso tem poder de mudar a arquitetura do meu dia inteiro.",
+ "Você é o detalhe que muda o quadro inteiro — e eu nunca me canso de olhar.",
+ "Tua coragem dá rumo às minhas próprias rotas perdidas.",
+ "Quando chega, o mundo não fica só mais claro: ele ganha sentido.",
+ "Te ouvir é como abrir uma janela para o ar exato que eu precisava respirar.",
+ "Você é um ponto fixo no meu universo, mas também é quem me faz girar.",
+ "Nada é tão vasto que me distraia do seu detalhe.",
+ "Você transforma silêncio em música sem precisar dizer nada.",
+ "Cada passo teu parece coreografia que o mundo precisava.",
+ "O tempo muda de textura quando você está perto.",
+ "Você é pausa que reorganiza o fluxo da minha mente.",
+ "Seu olhar é uma bússola que não erra o norte.",
+ "Você é constelação inteira e, ao mesmo tempo, estrela única.",
+ "Não existe noite longa quando lembro de você.",
+ "Sua presença é mais viva que qualquer cenário.",
+ "Você é a metáfora que dá sentido ao poema.",
+ "Até o caos fica poético quando passa por você.",
+ "Se o universo fala em equações, você é a resposta exata.",
+ "O tempo todo se curva só para caber dentro da tua órbita.",
+ "Cada gesto teu é matéria-prima daquilo que chamo destino.",
+ "Nem a imensidão cósmica é maior que tua simplicidade.",
+ "A luz das estrelas parece tímida quando comparada ao teu brilho.",
+ "Eu poderia vagar por mil galáxias, mas sempre escolheria teu céu."
+];
+
+function resetOrbs(){
+  state.orbs=[];
+  for(let i=0;i<state.total;i++){
+    state.orbs.push({
+      x:Math.random()*(W-100)+50,
+      y:Math.random()*(H-100)+50,
+      r:10+Math.random()*8,
+      vx:(Math.random()-.5)*0.8,
+      vy:(Math.random()-.5)*0.8,
+      msg:phrases[i%phrases.length],
+      got:false
+    });
+  }
+}
+resetOrbs();
+
+const countEl=document.getElementById('count'),barfill=document.getElementById('barfill'),
+statusEl=document.getElementById('status'),toast=document.getElementById('toast'),finalScr=document.getElementById('final');
+
+function loop(){ if(!paused){ update(); draw(); } requestAnimationFrame(loop); } loop();
+
+function update(){const p=state.player;
+  if(pressed.ArrowUp||pressed.w)p.y-=p.speed;
+  if(pressed.ArrowDown||pressed.s)p.y+=p.speed;
+  if(pressed.ArrowLeft||pressed.a)p.x-=p.speed;
+  if(pressed.ArrowRight||pressed.d)p.x+=p.speed;
+  for(const o of state.orbs){
+    if(o.got) continue;
+    o.x+=o.vx; o.y+=o.vy;
+    if(o.x<20||o.x>W-20)o.vx*=-1;if(o.y<20||o.y>H-20)o.vy*=-1;
+    const dx=o.x-p.x,dy=o.y-p.y;
+    if(dx*dx+dy*dy<(o.r+p.r)*(o.r+p.r)){o.got=true;collect(o);}
+  }
+}
+function draw(){ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(state.player.x,state.player.y,state.player.r,0,Math.PI*2);ctx.fill();
+  for(const o of state.orbs){if(!o.got){ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fillStyle="#9fd5ff";ctx.fill();}}
+}
+function collect(o){
+  state.collected++;countEl.textContent=state.collected;
+  barfill.style.width=(state.collected/state.total*100)+"%";
+  statusEl.textContent=state.collected>=state.total?"Tudo coletado!":"Continue explorando";
+  showToast(o.msg);
+  if(state.collected>=state.total){finalScr.classList.add('show');}
+}
+function showToast(msg){
+  toast.textContent=msg;toast.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=>toast.classList.remove('show'),4000);
+}
+function restart(){state.collected=0;countEl.textContent="0";barfill.style.width="0%";statusEl.textContent="Explore e colete ✨";resetOrbs();finalScr.classList.remove('show');}
+
+/* Pausa do jogo */
+const pauseBtn=document.getElementById('pauseBtn');
+pauseBtn.onclick=()=>{
+  paused=!paused;
+  pauseBtn.textContent=paused?'▶️ Continuar':'⏸️ Pausa';
+  statusEl.textContent=paused?'Jogo pausado':'Explore e colete ✨';
+};
+
+/* =========================
+   PLAYER DE MÚSICA
+   ========================= */
+const music = document.getElementById('music');
+const overlay = document.getElementById('musicOverlay');
+const overlayPlay = document.getElementById('overlayPlay');
+const overlayPick = document.getElementById('overlayPick');
+const fileInput = document.getElementById('fileInput');
+
+const ppBtn = document.getElementById('ppBtn');
+const seek = document.getElementById('seek');
+const seekFill = document.getElementById('seekFill');
+const tCur = document.getElementById('tCur');
+const tDur = document.getElementById('tDur');
+const muteBtn = document.getElementById('muteBtn');
+const vol = document.getElementById('vol');
+
+function fmt(t){ if(!isFinite(t)) return "0:00"; const m=Math.floor(t/60), s=Math.floor(t%60); return m+":"+(s<10?"0":"")+s; }
+function setPlayingUI(isPlaying){ ppBtn.textContent = isPlaying ? '⏸️' : '▶️'; }
+function updateTimeUI(){
+  seekFill.style.width = (music.currentTime / (music.duration||1) * 100) + "%";
+  tCur.textContent = fmt(music.currentTime);
+  tDur.textContent = fmt(music.duration||0);
+}
+
+/* Tocar */
+async function playMusic(){
+  try{
+    music.muted=false;
+    music.volume = parseFloat(vol.value || "0.65");
+    await music.play();
+    overlay.style.display = "none";
+    setPlayingUI(true);
+  }catch(e){
+    showToast('Não consegui tocar "Clarinha.mp3". Você pode escolher o arquivo no seu computador.');
+  }
+}
+
+/* Overlay: tocar / escolher arquivo */
+overlayPlay.addEventListener('click', ()=>{
+  if(!music.src || music.src.trim()==="" || music.src.endsWith("/")) music.src = "Clarinha.mp3";
+  playMusic();
+});
+overlayPick.addEventListener('click', ()=> fileInput.click());
+fileInput.addEventListener('change', ()=>{
+  const f = fileInput.files && fileInput.files[0];
+  if(!f) return;
+  const url = URL.createObjectURL(f);
+  music.src = url;
+  playMusic();
+});
+
+/* Mini-player */
+ppBtn.addEventListener('click', ()=>{
+  if(music.paused){ playMusic(); }
+  else { music.pause(); setPlayingUI(false); }
+});
+muteBtn.addEventListener('click', ()=>{
+  music.muted = !music.muted;
+  muteBtn.textContent = music.muted ? '🔇' : '🔊';
+});
+vol.addEventListener('input', ()=>{
+  music.volume = parseFloat(vol.value);
+  if(music.muted && music.volume>0){ music.muted=false; muteBtn.textContent='🔊'; }
+});
+seek.addEventListener('click', (e)=>{
+  const rect = seek.getBoundingClientRect();
+  const p = Math.min(1, Math.max(0, (e.clientX - rect.left)/rect.width));
+  if(isFinite(music.duration)) music.currentTime = p * music.duration;
+});
+
+/* Eventos do <audio> */
+music.addEventListener('loadedmetadata', ()=> { tDur.textContent = fmt(music.duration||0); });
+music.addEventListener('timeupdate', updateTimeUI);
+music.addEventListener('ended', ()=> { setPlayingUI(false); });
+
+/* Atalhos */
+addEventListener('keydown', (e)=>{
+  if(e.key==='m' || e.key==='M') ppBtn.click();      // play/pause música
+  if(e.key==='p' || e.key==='P') pauseBtn.click();   // pausa do jogo
+  if(e.key==='ArrowUp'){ vol.value = Math.min(1, parseFloat(vol.value)+0.05); vol.dispatchEvent(new Event('input')); }
+  if(e.key==='ArrowDown'){ vol.value = Math.max(0, parseFloat(vol.value)-0.05); vol.dispatchEvent(new Event('input')); }
+});
+
+/* Desbloqueio para Safari/iOS: não inicia sozinho, só autoriza o áudio */
+window.addEventListener('pointerdown', function unlockOnce(){
+  music.play().then(()=>{ music.pause(); music.currentTime=0; }).catch(()=>{});
+  window.removeEventListener('pointerdown', unlockOnce);
+},{once:true});
+</script>
+</body>
+</html>
