@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
 <title>Constelações — Página Interativa</title>
 <style>
   :root{
@@ -16,6 +16,9 @@
   }
   .wrap{position:relative;height:100vh;overflow:hidden;}
   #bg-media{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:-2;}
+
+  /* Canvas do jogo */
+  #game{display:block;width:100vw;height:100vh;touch-action:none;} /* impede scroll no toque */
 
   /* HUD do jogo */
   .hud{position:fixed;top:12px;left:50%;transform:translateX(-50%);
@@ -43,9 +46,9 @@
   @keyframes loveAnim{0%{opacity:0;transform:scale(.8);}30%{opacity:1;transform:scale(1.05);}60%{transform:scale(.95);}100%{transform:scale(1);opacity:1;}}
   @keyframes fadeIn{to{opacity:1}}
 
-  /* ===== MINI-PLAYER (menor e no topo esquerdo) ===== */
+  /* ===== MINI-PLAYER (pequeno no topo esquerdo) ===== */
   .player{
-    position:fixed;top:12px;left:12px; /* <- longe do toast do rodapé */
+    position:fixed;top:12px;left:12px;
     z-index:40;display:flex;align-items:center;gap:8px;
     padding:6px 8px;border-radius:10px;background:var(--glass);
     border:1px solid rgba(255,255,255,.15);backdrop-filter:blur(8px);
@@ -53,20 +56,31 @@
   .player .btn{padding:4px 8px;font-size:.85rem}
   .pp{cursor:pointer}
   .time{font-variant-numeric:tabular-nums;font-size:.8rem;color:var(--muted)}
-  .seek{
-    width:clamp(90px,22vw,160px); /* menor e responsivo */
-    height:6px;background:rgba(255,255,255,.18);border-radius:999px;position:relative;cursor:pointer;
-  }
+  .seek{width:clamp(90px,22vw,160px);height:6px;background:rgba(255,255,255,.18);border-radius:999px;position:relative;cursor:pointer;}
   .seek>i{position:absolute;left:0;top:0;height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:999px;}
   .vol{display:flex;align-items:center;gap:6px}
   .vol input[type="range"]{width:80px}
 
-  /* Se você quiser o player no rodapé depois, troque: top/left -> bottom/left
-     .player{ top:auto; bottom:12px; left:12px; } */
+  /* ===== D-PAD MOBILE ===== */
+  .pad{
+    position:fixed;left:12px;bottom:12px;display:grid;
+    grid-template-columns:repeat(3,56px);grid-template-rows:repeat(3,56px);gap:8px;
+    z-index:35;opacity:.96;user-select:none;
+  }
+  .pad button{
+    background:var(--glass);border:1px solid rgba(255,255,255,.18);
+    border-radius:14px;color:var(--text);font-size:20px;touch-action:none;
+  }
+  .pad .empty{visibility:hidden}
+  /* Mostrar pad apenas em telas touch */
+  @media (pointer:coarse){
+    .pad{display:grid}
+  }
+  @media (pointer:fine){
+    .pad{display:none}
+  }
 
-  /* Em telas muito estreitas, ainda cabe sem sombra de sobreposição */
   @media (max-width: 520px){
-    .player{top:12px;left:12px}
     .seek{width:clamp(80px,35vw,140px)}
     .vol input[type="range"]{width:70px}
   }
@@ -74,7 +88,7 @@
 </head>
 <body>
   <!-- Fundo em vídeo -->
-  <video id="bg-media" autoplay muted loop playsinline src="Clarinhaz.mp4"></video>
+  <video id="bg-media" autoplay muted loop playsinline src="clarinha.mp4"></video>
 
   <!-- Canvas do jogo -->
   <div class="wrap"><canvas id="game"></canvas></div>
@@ -134,6 +148,21 @@
     </div>
   </div>
 
+  <!-- D-pad mobile -->
+  <div class="pad" id="pad">
+    <button class="empty"></button>
+    <button data-dir="up">▲</button>
+    <button class="empty"></button>
+
+    <button data-dir="left">◀</button>
+    <button class="empty"></button>
+    <button data-dir="right">▶</button>
+
+    <button class="empty"></button>
+    <button data-dir="down">▼</button>
+    <button class="empty"></button>
+  </div>
+
 <script>
 /* =======================
    JOGO (textos intocados)
@@ -142,7 +171,44 @@ const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
 let W,H,paused=false;function resize(){W=canvas.width=innerWidth;H=canvas.height=innerHeight;}resize();addEventListener('resize',resize);
 
 const state={player:{x:W/2,y:H/2,r:10,speed:3},orbs:[],collected:0,total:30};
-const pressed={};addEventListener('keydown',e=>pressed[e.key]=true);addEventListener('keyup',e=>pressed[e.key]=false);
+const pressed={up:false,down:false,left:false,right:false};
+addEventListener('keydown',e=>{
+  if(e.key==='ArrowUp'||e.key==='w'||e.key==='W') pressed.up=true;
+  if(e.key==='ArrowDown'||e.key==='s'||e.key==='S') pressed.down=true;
+  if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') pressed.left=true;
+  if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') pressed.right=true;
+});
+addEventListener('keyup',e=>{
+  if(e.key==='ArrowUp'||e.key==='w'||e.key==='W') pressed.up=false;
+  if(e.key==='ArrowDown'||e.key==='s'||e.key==='S') pressed.down=false;
+  if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') pressed.left=false;
+  if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') pressed.right=false;
+});
+
+/* Toque/arraste para mover no mobile */
+let touchActive=false, touchTarget=null;
+function getTouchPos(t){
+  const rect = canvas.getBoundingClientRect();
+  return { x:(t.clientX-rect.left)*(W/rect.width), y:(t.clientY-rect.top)*(H/rect.height) };
+}
+canvas.addEventListener('touchstart', (e)=>{ e.preventDefault(); touchActive=true; touchTarget=getTouchPos(e.touches[0]); }, {passive:false});
+canvas.addEventListener('touchmove',  (e)=>{ e.preventDefault(); if(touchActive) touchTarget=getTouchPos(e.touches[0]); }, {passive:false});
+canvas.addEventListener('touchend',   ()=>{ touchActive=false; touchTarget=null; }, {passive:true});
+canvas.addEventListener('touchcancel',()=>{ touchActive=false; touchTarget=null; }, {passive:true});
+
+/* D-pad mobile (segura pra andar, solta pra parar) */
+document.querySelectorAll('.pad [data-dir]').forEach(btn=>{
+  const dir = btn.dataset.dir;
+  const on = ()=>{ pressed[dir]=true; };
+  const off= ()=>{ pressed[dir]=false; };
+  btn.addEventListener('touchstart',(e)=>{e.preventDefault();on();},{passive:false});
+  btn.addEventListener('touchend',off,{passive:true});
+  btn.addEventListener('touchcancel',off,{passive:true});
+  // clique também funciona (pra emuladores)
+  btn.addEventListener('mousedown',on);
+  btn.addEventListener('mouseup',off);
+  btn.addEventListener('mouseleave',off);
+});
 
 const phrases=[ /* <<< NÃO ALTERAR OS TEXTOS >>> */
  "Cada estrela que você toca é uma memória que brilha só porque existe você.",
@@ -193,11 +259,30 @@ statusEl=document.getElementById('status'),toast=document.getElementById('toast'
 
 function loop(){ if(!paused){ update(); draw(); } requestAnimationFrame(loop); } loop();
 
-function update(){const p=state.player;
-  if(pressed.ArrowUp||pressed.w)p.y-=p.speed;
-  if(pressed.ArrowDown||pressed.s)p.y+=p.speed;
-  if(pressed.ArrowLeft||pressed.a)p.x-=p.speed;
-  if(pressed.ArrowRight||pressed.d)p.x+=p.speed;
+function update(){
+  const p=state.player;
+
+  // Movimento por toque (segue o dedo)
+  if(touchActive && touchTarget){
+    const dx = touchTarget.x - p.x;
+    const dy = touchTarget.y - p.y;
+    const d  = Math.hypot(dx,dy) || 1;
+    const step = state.player.speed; // mesma velocidade base
+    p.x += (dx/d)*step;
+    p.y += (dy/d)*step;
+  } else {
+    // Teclas / D-pad
+    if(pressed.up)   p.y-=p.speed;
+    if(pressed.down) p.y+=p.speed;
+    if(pressed.left) p.x-=p.speed;
+    if(pressed.right)p.x+=p.speed;
+  }
+
+  // Limites
+  p.x = Math.max(p.r, Math.min(W-p.r, p.x));
+  p.y = Math.max(p.r, Math.min(H-p.r, p.y));
+
+  // Orbes
   for(const o of state.orbs){
     if(o.got) continue;
     o.x+=o.vx; o.y+=o.vy;
@@ -308,10 +393,10 @@ music.addEventListener('loadedmetadata', ()=> { tDur.textContent = fmt(music.dur
 music.addEventListener('timeupdate', updateTimeUI);
 music.addEventListener('ended', ()=> { setPlayingUI(false); });
 
-/* Atalhos */
+/* Atalhos (opcionais em mobile com teclado BT) */
 addEventListener('keydown', (e)=>{
-  if(e.key==='m' || e.key==='M') ppBtn.click();      // play/pause música
-  if(e.key==='p' || e.key==='P') pauseBtn.click();   // pausa do jogo
+  if(e.key==='m' || e.key==='M') ppBtn.click();
+  if(e.key==='p' || e.key==='P') pauseBtn.click();
   if(e.key==='ArrowUp'){ vol.value = Math.min(1, parseFloat(vol.value)+0.05); vol.dispatchEvent(new Event('input')); }
   if(e.key==='ArrowDown'){ vol.value = Math.max(0, parseFloat(vol.value)-0.05); vol.dispatchEvent(new Event('input')); }
 });
